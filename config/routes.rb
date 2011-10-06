@@ -1,4 +1,11 @@
 JITSpaceTreeWithObjects::Application.routes.draw do
+  get "pages/home"
+
+  resources :known_objects
+  resources :object_categories
+
+  root :to => 'pages#home'
+
   # The priority is based upon order of creation:
   # first created -> highest priority.
 

@@ -1,0 +1,11 @@
+# Read about fixtures at http://api.rubyonrails.org/classes/Fixtures.html
+
+one:
+  object_category_id: 1
+  name: MyString
+  description: MyText
+
+two:
+  object_category_id: 1
+  name: MyString
+  description: MyText

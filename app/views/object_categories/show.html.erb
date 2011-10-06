@@ -1,0 +1,15 @@
+<p id="notice"><%= notice %></p>
+
+<p>
+  <b>Name:</b>
+  <%= @object_category.name %>
+</p>
+
+<p>
+  <b>Description:</b>
+  <%= @object_category.description %>
+</p>
+
+
+<%= link_to 'Edit', edit_object_category_path(@object_category) %> |
+<%= link_to 'Back', object_categories_path %>

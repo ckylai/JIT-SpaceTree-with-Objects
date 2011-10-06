@@ -1,0 +1,29 @@
+<%= form_for(@known_object) do |f| %>
+  <% if @known_object.errors.any? %>
+    <div id="error_explanation">
+      <h2><%= pluralize(@known_object.errors.count, "error") %> prohibited this known_object from being saved:</h2>
+
+      <ul>
+      <% @known_object.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="field">
+    <%= f.label :object_category_id %><br />
+    <%= f.number_field :object_category_id %>
+  </div>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :description %><br />
+    <%= f.text_area :description %>
+  </div>
+  <div class="actions">
+    <%= f.submit %>
+  </div>
+<% end %>

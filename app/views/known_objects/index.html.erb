@@ -1,0 +1,27 @@
+<h1>Listing known_objects</h1>
+
+<table>
+  <tr>
+    <th>Object category</th>
+    <th>Name</th>
+    <th>Description</th>
+    <th></th>
+    <th></th>
+    <th></th>
+  </tr>
+
+<% @known_objects.each do |known_object| %>
+  <tr>
+    <td><%= known_object.object_category_id %></td>
+    <td><%= known_object.name %></td>
+    <td><%= known_object.description %></td>
+    <td><%= link_to 'Show', known_object %></td>
+    <td><%= link_to 'Edit', edit_known_object_path(known_object) %></td>
+    <td><%= link_to 'Destroy', known_object, confirm: 'Are you sure?', method: :delete %></td>
+  </tr>
+<% end %>
+</table>
+
+<br />
+
+<%= link_to 'New Known object', new_known_object_path %>

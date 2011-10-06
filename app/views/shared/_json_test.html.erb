@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <%= stylesheet_link_tag "base" %>
+    <%= stylesheet_link_tag "Spacetree" %>
+
+    <!--[if IE]>
+      <%= javascript_include_tag "excanvas" %>
+    <![endif]-->
+
+    <%= javascript_include_tag "jit" %>
+    <%= javascript_include_tag "example4-3-init" %>
+  </head>
+
+  <body onload="init();">
+    <div id="infovis"></div>
+    
+    <table>
+      <tr>
+        <td>
+          <label for="s-normal">Normal </label>
+        </td>
+        <td>
+          <input type="radio" id="s-normal" name="selection" checked="checked" value="normal" />
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <label for="s-root">Set as Root </label>
+        </td>
+        <td>
+          <input type="radio" id="s-root" name="selection" value="root" />
+        </td>
+      </tr>
+    </table>
+    
+    <div id="log"></div>
+  </body>
+</html>

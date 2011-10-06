@@ -1,14 +1,20 @@
-<!DOCTYPE html>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
 <html>
-<head>
-  <title>JITSpaceTreeWithObjects</title>
-  <%= stylesheet_link_tag    "application" %>
-  <%= javascript_include_tag "application" %>
-  <%= csrf_meta_tags %>
-</head>
-<body>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+		<title>JIT SpaceTree with Objects</title>
+		<%= csrf_meta_tag %>
+    <%= stylesheet_link_tag "application" %>
+    <!--  Note :defaults isn't used in Rails 3.1, and jQuery is already included in assets/application.js -->
+    <%= javascript_include_tag "application" %>
+      <script type="text/javascript">
+        var jQuery=$;
+      </script>
+	</head>
 
-<%= yield %>
+  <%= render 'shared/json_test' %>
 
-</body>
+	<body>
+    <%= yield %>
+	</body>
 </html>
