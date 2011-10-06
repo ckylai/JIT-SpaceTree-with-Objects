@@ -29,19 +29,6 @@ var Log = {
   }
 };
 
-// get the updated JSON if user presses "enter" (key code of 13) on the keyboard after updating a name in the project folder view
-// jQuery('#instant_textfield').live('keypress', function(event) {
-  // if( event.keyCode == 13 )
-  // {
-    // var fsd_id = jQuery('.function_structure_diagram_li:first').attr('id').slice(0,-30);
-    // jQuery.getJSON("/function_structure_diagrams/update/"+fsd_id+".json", function(fsdJSON) {
-      // console.log( JSON.stringify(fsdJSON) );
-    // });
-    // console.log( jQuery(this).attr('value') );
-    // init();
-  // }
-// });
-
 function init() {
 
   //init data
