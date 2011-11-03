@@ -4,6 +4,7 @@
   <tr>
     <th>Name</th>
     <th>Description</th>
+    <th>Deleted?</th>
     <th></th>
     <th></th>
     <th></th>
@@ -13,6 +14,7 @@
   <tr>
     <td><%= object_category.name %></td>
     <td><%= object_category.description %></td>
+    <td><%= object_category.deleted %></td>
     <td><%= link_to 'Show', object_category %></td>
     <td><%= link_to 'Edit', edit_object_category_path(object_category) %></td>
     <td><%= link_to 'Destroy', object_category, confirm: 'Are you sure?', method: :delete %></td>

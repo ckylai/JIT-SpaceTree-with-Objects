@@ -5,6 +5,7 @@
     <th>Object category</th>
     <th>Name</th>
     <th>Description</th>
+    <th>Deleted?</th>
     <th></th>
     <th></th>
     <th></th>
@@ -15,6 +16,7 @@
     <td><%= known_object.object_category_id %></td>
     <td><%= known_object.name %></td>
     <td><%= known_object.description %></td>
+    <td><%= known_object.deleted %></td>
     <td><%= link_to 'Show', known_object %></td>
     <td><%= link_to 'Edit', edit_known_object_path(known_object) %></td>
     <td><%= link_to 'Destroy', known_object, confirm: 'Are you sure?', method: :delete %></td>

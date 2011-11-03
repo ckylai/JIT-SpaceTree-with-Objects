@@ -11,7 +11,7 @@
 #
 # It's strongly recommended to check this file into your version control system.
 
-ActiveRecord::Schema.define(:version => 20111005233124) do
+ActiveRecord::Schema.define(:version => 20111025221116) do
 
   create_table "known_objects", :force => true do |t|
     t.integer  "object_category_id"
@@ -19,6 +19,7 @@ ActiveRecord::Schema.define(:version => 20111005233124) do
     t.text     "description"
     t.datetime "created_at"
     t.datetime "updated_at"
+    t.boolean  "deleted",            :default => false
   end
 
   create_table "object_categories", :force => true do |t|
@@ -26,6 +27,7 @@ ActiveRecord::Schema.define(:version => 20111005233124) do
     t.text     "description"
     t.datetime "created_at"
     t.datetime "updated_at"
+    t.boolean  "deleted",     :default => false
   end
 
 end
