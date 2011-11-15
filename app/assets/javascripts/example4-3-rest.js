@@ -1,19 +1,35 @@
 /*
- * JavaScript to render a SpaceTree for the project tree
+ * JavaScript to render a JIT SpaceTree for the project tree
+ *
+ * Author: Nicolas Garcia Belmonte
+ * Co-Author: Carrie Lai
+ */
+
+
+/*
+ * Notes
+ *
+ * "ID" refers to the ID of the object in the database; "JSON ID" refers to the ID of the object rendered in JSON, which is specified in its corresponding Rails controller. Essentially, the JSON ID is the ID plus an ending substring consisting of an underscore and 3 characters describing the object's resource. A JSON ID is necessary because each node rendered by JIT must have a unique node ID (which is not possible with a simple database ID). Hence, a JSON ID is equivalent to a "node ID".
+ */
+
+
+/*
+ * Global Variables
  */
 
 // the SpaceTree instance
 var st;
+// global variables for the "undo" and "redo" functions: the last CRUD action ("create", "update", or "delete"); the last node; the last node's parent node; the node's original name; the name the user entered for the created node
+var lastAction, lastNode, lastParentNode, lastName, newName;
 // whether or not a node is currently in editing mode, for editing a node's name
 var inEditing = false;
-// global variables for the "undo" function: the last CRUD action (create, update, or delete); the last resource that was created, updated, or deleted and its parent's resource; the JSON ID and ID of that last resource and of its parent; the node's original name, the last node
-var lastAction, lastResource, lastResource_JSONid, lastResource_id, lastParentResource, lastParentResource_JSONid, lastParentResource_id, lastName, lastNode;
-// whether or not an action was just undone
-var done;
-// global variable for the "redo" function: the name the user entered for the created node
-var newName;
+// whether or not the undo action was done
+var unDone = false;
+// whether or not the Ctrl key is pressed down
+var ctrlDown = false;
 
 var labelType, useGradients, nativeTextSupport, animate;
+
 
 (function() {
   var ua = navigator.userAgent,
@@ -40,22 +56,11 @@ var Log = {
   }
 };
 
-// returns a node's parent node
-function getParentNode( selectedNode ) {
-  if( selectedNode.id !== st.root ) { // if the node isn't the root node
-    // an array of the node's parents
-    var parents = selectedNode.getParents();
-    // the number of parents the node has
-    var numParents = parents.length;
-    // returns the node's parent, which is the last parent in the array
-    return parents[numParents-1];
-  }
-};
 
-// returns the requested information a node, depending on current node's depth
-function getNodeInfo( selectedNode, info, parent_id ) {
-  // object category is the current (last clicked) node
-  if( (selectedNode.id === st.root) || (selectedNode._depth % 2 === 0) ) {  // if current node is at node depth 0 (root), 2, or 4, etc.
+// returns the requested information of a node (with an optional 3rd parameter of a value that needs to be set), depending on the node's depth
+function getNodeInfo( node, info, value ) {
+  // the node is an Object Category
+  if( (node.id === st.root) || (node._depth % 2 === 0) ) {  // if the node is at node depth 0 (root), 2, or 4, etc.
     if( info === "resource" ) {
       return "object_categories";
     }
@@ -66,26 +71,15 @@ function getNodeInfo( selectedNode, info, parent_id ) {
       return "Object";
     }
     else if( info === "post child data" ) {
-      if( done !== "reDone" ) {
-        return { "known_object":{ "name":"New Object", "object_category_id":selectedNode.id } };
-      }
-      else {
-        return { "known_object":{ "name":newName, "object_category_id":selectedNode.id } };
-      }
+      return { "known_object":{ "name":value, "object_category_id":node.id } };
     }
     else if( info === "put data" ) {
-      return { "object_category":{ "name":jQuery("input").val() } };
-    }
-    else if( info === "put data to undo" ) {
-      return { "object_category":{ "name":lastName } };
-    }
-    else if( info === "put data to redo" ) {
-      return { "object_category":{ "name":newName } };
+      return { "object_category":{ "name":value } };
     }
   }
 
-  // object is the current (last clicked) node
-  else if( selectedNode._depth % 2 === 1 ) {  // if current node is at node depth 1, 3, or 5, etc.
+  // the node is an Object
+  else if( node._depth % 2 === 1 ) {  // if the node is at node depth 1, 3, or 5, etc.
     if( info === "resource" ) {
       return "known_objects";
     }
@@ -96,116 +90,163 @@ function getNodeInfo( selectedNode, info, parent_id ) {
       return "object_categories";
     }
     else if( info === "post sibling data" ) {
-      return { "known_object":{ "name":"New Object", "object_category_id":parent_id } };
+      return { "known_object":{ "name":"New Object", "object_category_id":value } };
     }
     else if( info === "put data" ) {
-      return { "known_object":{ "name":jQuery("input").val() } };
-    }
-    else if( info === "put data to undo" ) {
-      return { "known_object":{ "name":lastName } };
-    }
-    else if( info === "put data to redo" ) {
-      return { "known_object":{ "name":newName } };
+      return { "known_object":{ "name":value } };
     }
     else if( info === "delete data" ) {
-      return { "known_object":{ "deleted":true } };
-    }
-    else if( info === "delete data to undo" ) {
-      return { "known_object":{ "deleted":false } };
+      return { "known_object":{ "deleted":value } };
     }
   }
 };
 
-// REST: creates child node in database and JIT tree
-function createChildNode( selectedNode ) {
-  // the current (last clicked) node's child's resource
-  var child_resource = getNodeInfo( selectedNode, "child resource" );
-  // the data to be set when creating a child node to the current (last clicked) node; since the resource key cannot be a variable because it's taken literally, the entire data is set
-  var postData = getNodeInfo( selectedNode, "post child data" );
+// returns a node's parent node
+function getParentNode( node ) {
+  if( node.id !== st.root ) { // if the node isn't the root node
+    // an array of the node's parent nodes
+    var parents = node.getParents();
+    // the number of parent nodes the node has
+    var numParents = parents.length;
+    // returns the node's parent node, which is the last one in the array
+    return parents[numParents-1];
+  }
+};
 
-  // creates object in database
-  jQuery.ajax( {
-    type: "POST",
-    url: "/"+child_resource+".json",  // need JSON to retrieve created node's data - i.e. its ID
-    data: postData,
-    success: function( newNodeJSON ) {
+// REST: creates child node in the database and, on success, in the JIT tree
+function createChildNode( node, doing ) {
+  if( doing !== "undo" ) {  // if the child node is not created in an undo
+    // the node's child's resource
+    var child_resource = getNodeInfo( node, "child resource" );
+    // the created node's name
+    var newNodeName;
+    if( doing !== "redo" ) {  // if the child node is not created in a redo
+      // the node's child's resource name
+      newNodeName = "New " + getNodeInfo( node, "child resource name" );
+    }
+    else {
+      // the name the user entered for the created node before undoing and then redoing
+      newNodeName = newName;
+    }
+    // the data to be set when creating a child node to the node; since the resource key cannot be a variable because it's taken literally, the entire AJAX data is set; set created node's name
+    var postData = getNodeInfo( node, "post child data", newNodeName );
 
-      if( done !== "reDone" ) {
-        // the current (last clicked) node's child's resource name
-        var newNodeName = "New " + getNodeInfo( selectedNode, "child resource name" );
-      }
-      else {
-        var newNodeName = newName;
-      }
+    // creates entry in database
+    jQuery.ajax( {
+      type: "POST",
+      url: "/"+child_resource+".json",  // need JSON to retrieve created node's data - i.e. its ID
+      data: postData,
+      success: function( newNodeJSON ) {
 
-      // the new child node that's added
-      var newNode = {
-        id: selectedNode.id, // parent of new node (i.e. node being added to)
-        children: [{
-          id: newNodeJSON.id,
-          name: newNodeName,
-          data: {},
-          children: []
-        }]
-      };
-      // adds a child node to the current (last clicked) node
-      Log.write( "adding node..." );
-      st.addSubtree( newNode, "replot", {
-        hideLabels: false,
-        onComplete: function() {
-          Log.write( "node added" );
+        // the new child node that's added
+        var newNode = {
+          id: node.id, // parent of new node (i.e. node being added to)
+          children: [{
+            id: newNodeJSON.id,
+            name: newNodeName,
+            data: {},
+            children: []
+          }]
+        };
+        // adds a child node to the node
+        Log.write( "adding node..." );
+        st.addSubtree( newNode, "replot", {
+          hideLabels: false,
+          onComplete: function() {
+            Log.write( "node added" );
+          }
+        });
+
+        // selects the new node (highlights and centers the tree), as if it were clicked
+        st.onClick( newNodeJSON.id );
+
+        if( doing !== "redo" ) {  // if the child node is not created in a redo, no need to enable editing
+          // changes text to an input field with a value of the node's name
+          jQuery("#"+newNodeJSON.id).html('<input type="text" value="'+newNodeName+'" />');
+          // highlights text in input field
+          jQuery("input").select();
+
+          // node is now in editing mode
+          inEditing = true;
         }
-      });
 
-      // selects the new node (highlights and centers the tree), as if it were clicked
-      st.onClick( newNodeJSON.id );
+        // variables needed to undo the creation of this child node
+        lastAction = "create";
+        lastNode = st.graph.getNode( newNodeJSON.id );
+        lastParentNode = node;
 
-      if( done !== "reDone" ) {
-        // changes text to an input field with a value of the node's current name
-        jQuery("#"+newNodeJSON.id).html('<input type="text" value="'+newNodeName+'" />');
-        // highlights text in input field
-        jQuery("input").select();
       }
+    });
+  }
+  // undoing a delete: not actually creating a new child node; just restoring
+  else {
+    // the deleted node's resource
+    var resource = getNodeInfo( lastNode, "resource" );
+    // the deleted node's database ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
+    var resource_id = lastNode.id.slice(0,-4);
+    // the data to be set when updating the deleted node; since the resource key cannot be a variable because it's taken literally, the entire data is set; set "deleted" to false
+    var undoDeleteData = getNodeInfo( lastNode, "delete data", false );
 
-      // variables to undo the creation of this child node
-      lastAction = "create";
-      lastResource = child_resource;
-      lastResource_JSONid = newNodeJSON.id;
-      lastResource_id = newNodeJSON.id.slice(0,-4);
-      lastParentResource = null;
-      lastParentResource_JSONid = selectedNode.id;
-      lastParentResource_id = null;
-      lastName = null;
-      lastNode = null;
+    // un-soft-deletes node in database by setting the "deleted" column in the resource's table to false
+    jQuery.ajax( {
+      type: "PUT",
+      url: "/"+resource+"/"+resource_id,
+      data: undoDeleteData,
+      success: function() {
 
-    }
-  });
+        // can't simply add the node back with JIT's addSubtree method; because it will get added to the bottom of its original level, not its original position in the level
+        // also can't remove the deleted node's parent's children with JIT's removeSubtree method and then add them all back right after with JIT's addSubtree method; because if you click another node and then undo the delete, the function breaks and none of the parent's children get rendered.
+        // last solution: reload the entire SpaceTree
 
-  if( done !== "reDone" ) {
-    // node is now in editing mode
-    inEditing = true;
+        // the root node
+        var rootNode = st.graph.getNode( st.root );
+        // the root node's resource
+        var rootResource = getNodeInfo( rootNode, "resource" );
+        // the root node's database ID
+        var rootResource_id = st.root.slice(0,-4);
+
+        // gets root node's whole data
+        jQuery.ajax( {
+          type: "GET",
+          url: "/"+rootResource+"/"+rootResource_id+".json",  // need JSON to retrieve restored node's parent's data - i.e. its children
+          success: function( treeJSON ) {
+// NOTE: in DesignPad, ensure it's not slow to reload the ST
+
+// NOTE: need Log.write?
+            //load json data
+            st.loadJSON(treeJSON);
+            //compute node positions and layout
+            st.compute();
+
+            // selects the restored node
+            st.onClick( lastNode.id );
+
+          }
+        });
+
+      }
+    });
   }
 };
 
-// REST: creates sibling node in database and JIT tree
-function createSiblingNode( selectedNode ) {
-  // the current (last clicked) node's parent's JSON ID
-  var parent_JSONid = getParentNode( st.clickedNode ).id;
+// REST: creates sibling node in the database and, on success, in the JIT tree
+function createSiblingNode( node ) {
+  // the node's parent's JSON ID
+  var parent_JSONid = getParentNode( node ).id;
+  // the node's sibling's resource, which is the same as the node's
+  var sibling_resource = getNodeInfo( node, "resource" );
+  // the data to be set when creating a sibling node to the node; since the resource key cannot be a variable because it's taken literally, the entire AJAX data is set; set parent ID
+  var postData = getNodeInfo( node, "post sibling data", parent_JSONid.slice(0,-4) );
 
-  // the current (last clicked) node's sibling's resource, which is the same as the current node's
-  var sibling_resource = getNodeInfo( selectedNode, "resource" );
-  // the data to be set when creating a child node to the current (last clicked) node; since the resource key cannot be a variable because it's taken literally, the entire data is set
-  var postData = getNodeInfo( selectedNode, "post sibling data", parent_JSONid.slice(0,-4) );
-
-  // creates object in database
+  // creates entry in database
   jQuery.ajax( {
     type: "POST",
     url: "/"+sibling_resource+".json",  // need JSON to retrieve created node's data - i.e. its ID
     data: postData,
     success: function( newNodeJSON ) {
 
-      // the current (last clicked) node's sibling's resource name, which is the same as the current node's
-      var newNodeName = "New " + getNodeInfo( selectedNode, "resource name" );
+      // the node's sibling's resource name, which is the same as the node's
+      var newNodeName = "New " + getNodeInfo( node, "resource name" );
 
       // the new child node that's added
       var newNode = {
@@ -217,7 +258,7 @@ function createSiblingNode( selectedNode ) {
           children: []
         }]
       };
-      // adds a child node to the current (last clicked) node
+      // adds a child node to the node's parent
       Log.write( "adding node..." );
       st.addSubtree( newNode, "replot", {
         hideLabels: false,
@@ -234,67 +275,56 @@ function createSiblingNode( selectedNode ) {
       // highlights text in input field
       jQuery("input").select();
 
-      // variables to undo the creation of this sibling node
-      lastAction = "create";
-      lastResource = sibling_resource;
-      lastResource_JSONid = newNodeJSON.id;
-      lastResource_id = newNodeJSON.id.slice(0,-4);
-      lastParentResource = null;
-      lastParentResource_JSONid = parent_JSONid;
-      lastParentResource_id = null;
-      lastName = null;
-      lastNode = null;
-
-    }
-  });
-
-  // node is now in editing mode
-  inEditing = true;
-};
-
-// enables updating node name
-function enableUpdateNode( selectedNode ) {
-  // the current (last clicked) node's resource
-  var resource = getNodeInfo( selectedNode, "resource" );
-  // the current (last clicked) node's ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
-  var resource_id = selectedNode.id.slice(0,-4);
-
-  // gets current (last clicked) node's data - i.e. its ID and name
-  jQuery.ajax( {
-    type: "GET",
-    url: "/"+resource+"/"+resource_id+".json",  // need JSON to retrieve node's data - i.e. its ID and name
-    success: function( currNode ) {
-
-      // changes text to an input field with a value of the node's current name - need to get it from database because names aren't actually saved in the JIT tree ("text" just replaces it)
-      jQuery("#"+currNode.id).html('<input type="text" value="'+currNode.name+'" />');
-      // highlights text in input field
-      jQuery("input").select();
       // node is now in editing mode
       inEditing = true;
 
-      // variables to undo the renaming of this node
+      // variables needed to undo the creation of this sibling node
+      lastAction = "create";
+      lastNode = st.graph.getNode( newNodeJSON.id );
+      lastParentNode = getParentNode( node );
+
+    }
+  });
+};
+
+// enables updating node name: creates an input field for the user to enter the desired name
+function enableUpdateNode( node ) {
+  // the node's resource
+  var resource = getNodeInfo( node, "resource" );
+  // the node's database ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
+  var resource_id = node.id.slice(0,-4);
+
+  // gets node's data - i.e. its ID and name
+  jQuery.ajax( {
+    type: "GET",
+    url: "/"+resource+"/"+resource_id+".json",  // need JSON to retrieve node's data - i.e. its ID and name
+    success: function( currNodeJSON ) {
+
+      // changes text to an input field with a value of the node's current name - need to get it from database because names aren't actually saved in the JIT tree ("text" just replaces it)
+      jQuery("#"+currNodeJSON.id).html('<input type="text" value="'+currNodeJSON.name+'" />');
+      // highlights text in input field
+      jQuery("input").select();
+
+      // node is now in editing mode
+      inEditing = true;
+
+      // variables needed to undo the renaming of this node; set here instead of in the "updateNode" function because all the needed information is here (i.e. the node's retrieved data) and also because "updateNode" is called when a user enters a name after node creation
       lastAction = "update";
-      lastResource = resource;
-      lastResource_JSONid = currNode.id;
-      lastResource_id = resource_id;
-      lastParentResource = null;
-      lastParentResource_JSONid = null;
-      lastParentResource_id = null;
-      lastName = currNode.name;
-      lastNode = selectedNode;
+      lastNode = node;
+      lastName = currNodeJSON.name;
 
     }
   });
 }
 
-// REST: updates node name in database and JIT tree
-function updateNode( selectedNode ) {
-  // the current (last clicked) node's resource
-  var resource = getNodeInfo( selectedNode, "resource" );
-  // the current (last clicked) node's ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
-  var resource_id = selectedNode.id.slice(0,-4);
-  // the data to be set when updating the current (last clicked) node; since the resource key cannot be a variable because it's taken literally, the entire data is set
-  var putData = getNodeInfo( selectedNode, "put data" );
+// REST: updates node name in the database and, on success, in the JIT tree
+function updateNode( node, nodeName, doing ) {
+  // the node's resource
+  var resource = getNodeInfo( node, "resource" );
+  // the node's database ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
+  var resource_id = node.id.slice(0,-4);
+  // the data to be set when updating the node; since the resource key cannot be a variable because it's taken literally, the entire AJAX data is set; set new node name
+  var putData = getNodeInfo( node, "put data", nodeName );
 
   // updates name in database
   jQuery.ajax( {
@@ -303,59 +333,71 @@ function updateNode( selectedNode ) {
     data: putData,
     success: function() {
 
-      // variable to redo user's name in the input
-      newName = jQuery("input").val();
+      if( doing !== "undo" ) {  // if the node name is not updated in an undo
+        // variable needed to redo user's name in the input
+        newName = nodeName;
+      }
 
-      // changes node's current name to the new name, which is the value of the input field in the node
-      jQuery("#"+selectedNode.id).text(jQuery("input").val());
+      // changes node's current name to the new name, which is the value of the input field in the node; the text replaces the input field
+      jQuery("#"+node.id).text(nodeName);
+
+      if( (doing !== "undo") && (doing !== "redo") ) {  // if the node name is not updated in an undo or redo
+        // done editing
+        inEditing = false;
+      }
 
     }
   });
-
-  // done editing
-  inEditing = false;
 };
 
-// REST: soft-deletes node in database and JIT tree
-function deleteNode( selectedNode ) {
-  // the current (last clicked) node's resource
-  var resource = getNodeInfo( selectedNode, "resource" );
-  // the current (last clicked) node's ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
-  var resource_id = selectedNode.id.slice(0,-4);
-  // the data to be set when updating the current (last clicked) node; since the resource key cannot be a variable because it's taken literally, the entire data is set
-  var deleteData = getNodeInfo( selectedNode, "delete data" );
+// REST: deletes node in the database and, on success, in the JIT tree.
+// Condition is either "soft" or "hard": soft-delete updates the "deleted" flag in the database from false to true, while hard-delete deletes the entry in the database
+function deleteNode( node, condition ) {
+  // the node's resource
+  var resource = getNodeInfo( node, "resource" );
+  // the node's database ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
+  var resource_id = node.id.slice(0,-4);
+  // the type of delete: soft does an update, while hard does a delete
+  var deleteType;
+  // the data to be set when updating the node; since the resource key cannot be a variable because it's taken literally, the entire AJAX data is set; set "deleted" to true
+  var deleteData;
+  if( condition === "soft" ) {
+    deleteType = "PUT";
+    deleteData = getNodeInfo( node, "delete data", true );
+  }
+  else if( condition === "hard" ) {
+    deleteType = "DELETE";
+    // no data has to be set for a hard-delete
+    deleteData = null;
+  }
 
-  // soft-deletes node in database by setting the "deleted" column in the resource's table to true
+  // soft-deletes node in database
   jQuery.ajax( {
-    type: "PUT",
+    type: deleteType,
     url: "/"+resource+"/"+resource_id,
     data: deleteData,
     success: function() {
 
-      // deletes the current (last clicked) node (and its children if it has them)
+      // removes the node (and its children if it has them)
       Log.write( "removing subtree..." );
-      st.removeSubtree( selectedNode.id, true, 'animate', { // 'replot' doesn't seem to work, but duration is already set to 0 to disable animations
+      st.removeSubtree( node.id, true, "animate", { // "replot" doesn't work for an unknown reason, but duration is already set to 0 to disable animations
         hideLabels: false,
         onComplete: function() {
           Log.write( "subtree removed" );
         }
       });
 
-      // the current (last clicked) node's parent's JSON ID
-      var parent_JSONid = getParentNode( st.clickedNode ).id;
+      // the node's parent's JSON ID
+      var parent_JSONid = getParentNode( node ).id;
       // selects the deleted node's parent (highlights and centers the tree), as if it were clicked
       st.onClick( parent_JSONid );
 
-      // variables to undo the soft-deletion of this node
-      lastAction = "delete";
-      lastResource = resource;
-      lastResource_JSONid = selectedNode.id;
-      lastResource_id = resource_id;
-      lastParentResource = getNodeInfo( selectedNode, "parent resource" );
-      lastParentResource_JSONid = parent_JSONid;
-      lastParentResource_id = parent_JSONid.slice(0,-4);
-      lastName = null;
-      lastNode = selectedNode;
+      if( condition !== "hard" ) {
+        // variables needed to undo the soft-deletion of this node
+        lastAction = "delete";
+        lastNode = node;
+        lastParentNode = getParentNode( node );
+      }
 
     }
   });
@@ -363,133 +405,36 @@ function deleteNode( selectedNode ) {
 
 // undoes last action
 function undoLastAction() {
-  if( done !== "unDone" ) {
-    // allows redo
-    done = "unDone";
-
+  if( !unDone ) { // if the last action isn't "undo"
     if( lastAction === "create" ) {
-      // deletes the created node in the database
-      jQuery.ajax( {
-        type: "DELETE",
-        url: "/"+lastResource+"/"+lastResource_id,
-        success: function() {
-
-          // deletes the node
-          Log.write( "removing subtree..." );
-          st.removeSubtree( lastResource_JSONid, true, 'animate', { // 'replot' doesn't seem to work, but duration is already set to 0 to disable animations
-            hideLabels: false,
-            onComplete: function() {
-              Log.write( "subtree removed" );
-            }
-          });
-
-          // selects the removed node's parent node
-          st.onClick( lastParentResource_JSONid );
-
-        }
-      });
+      // hard-deletes the created node; reasoning is that the table shouldn’t be cluttered with soft-deleted entries that have no children, since "undo" is only valid for one action without a page refresh
+      deleteNode( lastNode, "hard" );
     }
-
     else if( lastAction === "update" ) {
-      // the data to be set when updating the updated node; since the resource key cannot be a variable because it's taken literally, the entire data is set
-      var undoPutData = getNodeInfo( lastNode, "put data to undo" );
-
-      // updates name in database
-      jQuery.ajax( {
-        type: "PUT",
-        url: "/"+lastResource+"/"+lastResource_id,
-        data: undoPutData,
-        success: function() {
-
-          // changes updated node's current name to its original name
-          jQuery("#"+lastResource_JSONid).text(lastName);
-
-        }
-      });
+      updateNode( lastNode, lastName, "undo" );
     }
-
     else if( lastAction === "delete" ) {
-      // the data to be set when updating the deleted node; since the resource key cannot be a variable because it's taken literally, the entire data is set
-      var undoDeleteData = getNodeInfo( lastNode, "delete data to undo" );
-
-      // un-soft-deletes node in database by setting the "deleted" column in the resource's table to false
-      jQuery.ajax( {
-        type: "PUT",
-        url: "/"+lastResource+"/"+lastResource_id,
-        data: undoDeleteData,
-        success: function() {
-
-          // gets deleted node's parent's data - i.e. its children
-          jQuery.ajax( {
-            type: "GET",
-            url: "/"+lastParentResource+"/"+lastParentResource_id+".json",  // need JSON to retrieve restored node's parent's data - i.e. its children
-            success: function( parentJSON ) {
-// NOTE: in DesignPad, ensure it's not faster to just reload the ST
-              // deletes the restored node's parent's children - needed to preserve order of restored node in the level (otherwise it gets added to the bottom of the level)
-              Log.write( "restoring subtree..." );
-              st.removeSubtree( lastParentResource_JSONid, false, 'animate', { // 'replot' doesn't seem to work, but duration is already set to 0 to disable animations
-                hideLabels: false,
-                onComplete: function() {
-
-                  // the deleted node and its siblings that are restored
-                  var parentChildren = {
-                    id: lastParentResource_JSONid, // parent of deleted node (i.e. node being added to)
-                    children: parentJSON.children
-                  };
-                  // adds restored node and its siblings to its parent node
-                  st.addSubtree( parentChildren, "replot", {
-                    hideLabels: false,
-                    onComplete: function() {
-                      Log.write( "subtree restored" );
-                    }
-                  });
-
-                  // selects the restored node
-                  st.onClick( lastResource_JSONid );
-
-                }
-              });
-
-            }
-          });
-
-        }
-      });
+      createChildNode( lastParentNode, "undo" );
     }
+    // done undo; disable successive undo
+    unDone = true;
   }
 };
 
 // redoes last action, if it was undone
 function redoLastAction() {
-  if( done === "unDone" ) {
-    // allows redo
-    done = "reDone";
-
+  if( unDone ) {  // if the last action is "undo"
     if( lastAction === "create" ) {
-      createChildNode( st.clickedNode );
+      createChildNode( lastParentNode, "redo" );
     }
-
     else if( lastAction === "update" ) {
-      // the data to be set when updating the updated node; since the resource key cannot be a variable because it's taken literally, the entire data is set
-      var redoPutData = getNodeInfo( lastNode, "put data to redo" );
-
-      // updates name in database
-      jQuery.ajax( {
-        type: "PUT",
-        url: "/"+lastResource+"/"+lastResource_id,
-        data: redoPutData,
-        success: function() {
-
-          // changes updated node's current name to its original name
-          jQuery("#"+lastResource_JSONid).text(newName);
-
-        }
-      });
+      updateNode( lastNode, newName, "redo" );
     }
-
     else if( lastAction === "delete" ) {  // deliberately not asking confirmation, since it's unnecessary
-      deleteNode( st.clickedNode );
+      deleteNode( lastNode, "soft" );
     }
+    // done redo (not undo); enable successive undo
+    unDone = false;
   }
 };
 
@@ -535,7 +480,7 @@ if( st.clickedNode._depth < 1 ) { // REMOVE CHECK WHEN IN DESIGNPAD; this check'
       // updating entered node name
       else {
         // updates the current (last clicked) node's name
-        updateNode( st.clickedNode );
+        updateNode( st.clickedNode, jQuery("input").val() );
       }
       break;
 
@@ -560,12 +505,12 @@ if( st.clickedNode._depth < 1 ) { // REMOVE CHECK WHEN IN DESIGNPAD; this check'
           if( st.clickedNode.anySubnode("exist") ) {  // if the current (last clicked) node has any children (Note: Not soft-deleting children because they won't be rendered in the tree without a parent in it)
             if( confirm("Are you sure you would like to delete \""+st.clickedNode.name+"\" and its sub-node(s)?") ) { // confirms if the user wants to delete the current (last clicked) node
               // soft-deletes the current (last clicked) node
-              deleteNode( st.clickedNode );
+              deleteNode( st.clickedNode, "soft" );
             }
           }
           else {
             // soft-deletes the current (last clicked) node
-            deleteNode( st.clickedNode );
+            deleteNode( st.clickedNode, "soft" );
           }
         }
         // warns the user that s/he cannot delete the base FSD node
@@ -579,10 +524,10 @@ if( st.clickedNode._depth < 1 ) { // REMOVE CHECK WHEN IN DESIGNPAD; this check'
     case 37:  // Arrow Left key
     // only allow navigation if a node's not in editing mode
       if( !inEditing ) {
-        // the current (last clicked) node's parent's JSON ID
-        var parent_JSONid = getParentNode( st.clickedNode ).id;
-
         if( st.clickedNode.id !== st.root ) { // if it's not the root node
+          // the current (last clicked) node's parent's JSON ID
+          var parent_JSONid = getParentNode( st.clickedNode ).id;
+
           // selects parent
           st.onClick( parent_JSONid );
         }
@@ -604,34 +549,36 @@ if( st.clickedNode._depth < 1 ) { // REMOVE CHECK WHEN IN DESIGNPAD; this check'
     case 38:  // Arrow Up key
     // only allow navigation if a node's not in editing mode
       if( !inEditing ) {
-        // the current (last clicked) node's parent's resource
-        var parent_resource = getNodeInfo( st.clickedNode, "parent resource" );
-        // the current (last clicked) node's parent's ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
-        var parent_id = getParentNode( st.clickedNode ).id.slice(0,-4);
-        // the current (last clicked) node's parent
-        var parentNode = getParentNode( st.clickedNode );
+        if( st.clickedNode.id !== st.root ) { // if it's not the root node
+          // the current (last clicked) node's parent's resource
+          var parent_resource = getNodeInfo( st.clickedNode, "parent resource" );
+          // the current (last clicked) node's parent's ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
+          var parent_id = getParentNode( st.clickedNode ).id.slice(0,-4);
+          // the current (last clicked) node's parent
+          var parentNode = getParentNode( st.clickedNode );
 
-        // gets current (last clicked) node's parent's data - i.e. its children
-        jQuery.ajax( {
-          type: "GET",
-          url: "/"+parent_resource+"/"+parent_id+".json",  // need JSON to retrieve created node's data - i.e. its children
-          success: function( parentJSON ) {
-            // iterates through JSON's direct children
-            jQuery.each( parentJSON.children, function( i, v ) {
-              if( v.id === st.clickedNode.id ) {  // if the child's JSON ID matches the current (last clicked) node's JSON ID
-                if( i > 0 ) { // ensure the child isn't the 1st one (0-based indexing)
-                  // selects the current (last clicked) node's previous sibling, which is its parent's i-th child (1-based indexing with current node as (i+1)-th child)
-                  st.onClick( parentNode.getSubnodes()[i].id );
-                  return;
+          // gets current (last clicked) node's parent's data - i.e. its children
+          jQuery.ajax( {
+            type: "GET",
+            url: "/"+parent_resource+"/"+parent_id+".json",  // need JSON to retrieve created node's data - i.e. its children
+            success: function( parentJSON ) {
+              // iterates through JSON's direct children
+              jQuery.each( parentJSON.children, function( i, v ) {
+                if( v.id === st.clickedNode.id ) {  // if the child's JSON ID matches the current (last clicked) node's JSON ID
+                  if( i > 0 ) { // ensure the child isn't the 1st one (0-based indexing)
+                    // selects the current (last clicked) node's previous sibling, which is its parent's i-th child (1-based indexing with current node as (i+1)-th child)
+                    st.onClick( parentNode.getSubnodes()[i].id );
+                    return;
+                  }
+                  else {
+                    // don't do anything if it's already the first child
+                    return;
+                  }
                 }
-                else {
-                  // don't do anything if it's already the first child
-                  return;
-                }
-              }
-            });
-          }
-        });
+              });
+            }
+          });
+        }
       }
       break;
 
@@ -639,57 +586,79 @@ if( st.clickedNode._depth < 1 ) { // REMOVE CHECK WHEN IN DESIGNPAD; this check'
     case 40:  // Arrow Down key
       // only allow navigation if a node's not in editing mode
       if( !inEditing ) {
-        // the current (last clicked) node's parent's resource
-        var parent_resource = getNodeInfo( st.clickedNode, "parent resource" );
-        // the current (last clicked) node's parent's ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
-        var parent_id = getParentNode( st.clickedNode ).id.slice(0,-4);
-        // the current (last clicked) node's parent
-        var parentNode = getParentNode( st.clickedNode );
+        if( st.clickedNode.id !== st.root ) { // if it's not the root node
+          // the current (last clicked) node's parent's resource
+          var parent_resource = getNodeInfo( st.clickedNode, "parent resource" );
+          // the current (last clicked) node's parent's ID; gets by removing the last 4 characters ("_[resource]") of its JSON ID to take only the numeric part
+          var parent_id = getParentNode( st.clickedNode ).id.slice(0,-4);
+          // the current (last clicked) node's parent
+          var parentNode = getParentNode( st.clickedNode );
 
-        // counts current (last clicked) node's parent's children number (1-based "indexing")
-        var count = 0;
-        parentNode.eachSubnode( function(n) {
-          count++;
-        });
+          // counts current (last clicked) node's parent's children number (1-based "indexing")
+          var count = 0;
+          parentNode.eachSubnode( function(n) {
+            count++;
+          });
 
-        // gets current (last clicked) node's parent's data - i.e. its children
-        jQuery.ajax( {
-          type: "GET",
-          url: "/"+parent_resource+"/"+parent_id+".json",  // need JSON to retrieve created node's data - i.e. its children
-          success: function( parentJSON ) {
-            // iterates through JSON's direct children
-            jQuery.each( parentJSON.children, function( i, v ) {
-              if( v.id === st.clickedNode.id ) {  // if the child's JSON ID matches the current (last clicked) node's JSON ID
-                if( i+1 < count ) { // ensure the child isn't the last one (0-based indexing)
-                  // selects the current (last clicked) node's next sibling, which is its parent's (i+2)-th child (1-based indexing with current node as (i+1)-th child)
-                  st.onClick( parentNode.getSubnodes()[i+2].id );
-                  return;
+          // gets current (last clicked) node's parent's data - i.e. its children
+          jQuery.ajax( {
+            type: "GET",
+            url: "/"+parent_resource+"/"+parent_id+".json",  // need JSON to retrieve created node's data - i.e. its children
+            success: function( parentJSON ) {
+              // iterates through JSON's direct children
+              jQuery.each( parentJSON.children, function( i, v ) {
+                if( v.id === st.clickedNode.id ) {  // if the child's JSON ID matches the current (last clicked) node's JSON ID
+                  if( i+1 < count ) { // ensure the child isn't the last one (0-based indexing)
+                    // selects the current (last clicked) node's next sibling, which is its parent's (i+2)-th child (1-based indexing with current node as (i+1)-th child)
+                    st.onClick( parentNode.getSubnodes()[i+2].id );
+                    return;
+                  }
+                  else {
+                    // don't do anything if it's already the first child
+                    return;
+                  }
                 }
-                else {
-                  // don't do anything if it's already the first child
-                  return;
-                }
-              }
-            });
-          }
-        });
+              });
+            }
+          });
+        }
       }
       break;
 
+    // ensuring the Ctrl key is down with the Z or Y keys to allow undo or redo
+    case 17:  // Ctrl key
+      ctrlDown = true;
+      break;
+
     // undoing last action
-    case ( 17 && 90 ):  // Ctrl + Z keys
-      // only allow undoing if a node's not already in editing mode
-      if( !inEditing ) {
+    case 90:  // Z key
+      // only allow undoing if the Ctrl key is down and if a node's not already in editing mode
+      if( ctrlDown && !inEditing ) {
         undoLastAction();
       }
       break;
 
     // redoing last action
-    case ( 17 && 89 ):  // Ctrl + Y keys
-      // only allow redoing if a node's not already in editing mode
-      if( !inEditing ) {
+    case 89:  // Y key
+      // only allow redoing if the Ctrl key is down and if a node's not already in editing mode
+      if( ctrlDown && !inEditing ) {
         redoLastAction();
       }
+      break;
+
+  }
+}).keyup( function( event ) {
+  if( window.event ) {  // for IE compatibility
+    var keyCode = window.event.keyCode;
+  }
+  else {
+    var keyCode = event.which;
+  }
+  switch( keyCode ) {
+
+    // ensuring the Ctrl key is down with the Z or Y keys to allow undo or redo - when the Ctrl key is released, then the Ctrl key isn't down anymore
+    case 17:  // Ctrl key
+      ctrlDown = false;
       break;
 
   }
@@ -819,7 +788,7 @@ function init( fsdJSON ) {
         if( inEditing ) { // if a node is in editing mode
           if( node.id !== st.clickedNode.id ) {  // if user clicks anywhere except for the current (last clicked) node
             // updates the current (last clicked) node's name
-            updateNode( st.clickedNode );
+            updateNode( st.clickedNode, jQuery("input").val() );
           }
         }
       }
